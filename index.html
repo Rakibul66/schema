@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bponi Suit - Interactive DB Schema</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Warm Neutrals -->
+    <!-- Application Structure Plan: A two-panel layout is chosen for optimal user experience. The left panel serves as a persistent navigation menu, listing all database tables. This allows users to quickly switch context. The right panel is the main content area, displaying detailed information for the selected table. This structure is superior to a linear document as it prevents scrolling fatigue and makes comparison between tables easier. An interactive "Visual Relationship Map" is included as the primary view to give a high-level overview of the schema, with the ability to click through to the detailed table explorer. This dual-view approach caters to both high-level architectural understanding and low-level detail inspection. -->
+    <!-- Visualization & Content Choices: The primary "visualization" is a conceptual, interactive entity-relationship diagram built using HTML and CSS, not a data chart. Report Info: Table Structures & Foreign Keys -> Goal: Organize & show relationships -> Viz/Presentation Method: Interactive cards in a grid layout representing tables -> Interaction: Clicking a card highlights it and its direct relationships, and navigates to its detailed view -> Justification: This is more intuitive and engaging than a static ASCII diagram and avoids the complexity of canvas drawing, keeping the app lightweight. For detailed schemas, standard HTML tables are used for their clarity and semantic correctness in presenting tabular data. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #FDFBF8;
+            color: #4B4B4B;
+        }
+        .nav-item.active {
+            background-color: #F4A261;
+            color: #ffffff;
+            font-weight: 600;
+        }
+        .nav-item:hover {
+            background-color: #E76F51;
+            color: #ffffff;
+        }
+        .table-header {
+            background-color: #264653;
+            color: white;
+        }
+        .key-pk {
+            background-color: #E9C46A;
+            color: #4B4B4B;
+            font-weight: 500;
+        }
+        .key-fk {
+            background-color: #2A9D8F;
+            color: white;
+            font-weight: 500;
+        }
+        .diagram-card {
+            transition: all 0.2s ease-in-out;
+            border: 2px solid #D1D5DB;
+        }
+        .diagram-card.highlighted {
+            border-color: #F4A261;
+            transform: scale(1.03);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        .diagram-card.related {
+            border-color: #2A9D8F;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <div id="app" class="min-h-screen">
+        <header class="bg-white shadow-sm p-4 sticky top-0 z-10">
+            <div class="container mx-auto flex justify-between items-center">
+                <h1 class="text-2xl font-bold text-[#264653]">Bponi Suit <span class="font-normal text-gray-500">| Interactive DB Schema</span></h1>
+                <div class="flex items-center space-x-2">
+                    <button id="view-toggle-btn" class="px-4 py-2 rounded-md text-sm font-medium transition-colors">Switch View</button>
+                </div>
+            </div>
+        </header>
+
+        <main class="container mx-auto p-4 md:p-6 lg:p-8">
+            <div id="visual-view" class="w-full">
+                <div class="text-center mb-8">
+                    <h2 class="text-3xl font-bold text-[#264653]">Visual Relationship Map</h2>
+                    <p class="mt-2 text-lg text-gray-600">Click on a table to see its details and direct relationships.</p>
+                </div>
+                <div id="diagram-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                </div>
+            </div>
+
+            <div id="explorer-view" class="hidden">
+                 <div class="flex flex-col md:flex-row gap-8">
+                    <nav id="sidebar" class="w-full md:w-1/4 lg:w-1/5">
+                        <h2 class="text-lg font-semibold mb-3 text-[#264653] border-b-2 border-[#F4A261] pb-2">Tables</h2>
+                        <ul id="tables-nav" class="space-y-1">
+                        </ul>
+                    </nav>
+                    <section id="main-content" class="w-full md:w-3/4 lg:w-4/5">
+                        <div id="table-details-container" class="bg-white p-6 rounded-lg shadow-md">
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </main>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+
+    const schemaData = {
+        super_admins: {
+            purpose: "Stores credentials for super administrators who manage the entire system.",
+            columns: [
+                { name: 'id', type: 'UUID', constraints: 'PRIMARY KEY', description: 'Unique identifier for the super admin.' },
+                { name: 'email', type: 'VARCHAR(255)', constraints: 'UNIQUE, NOT NULL', description: 'Login email for the super admin.' },
+                { name: 'password_hash', type: 'VARCHAR(255)', constraints: 'NOT NULL', description: 'Hashed password for security.' },
+                { name: 'full_name', type: 'VARCHAR(255)', constraints: 'NULL', description: 'Full name of the super admin.' },
+                { name: 'created_at', type: 'TIMESTAMPTZ', constraints: 'NOT NULL DEFAULT NOW()', description: 'Timestamp of when the record was created.' },
+                { name: 'updated_at', type: 'TIMESTAMPTZ', constraints: 'NOT NULL DEFAULT NOW()', description: 'Timestamp of the last update.' }
+            ],
+            relations: {
+                hasMany: ['companies']
+            }
+        },
+        companies: {
+            purpose: "Stores information about registered companies. This table is central to the application.",
+            columns: [
+                { name: 'id', type: 'UUID', constraints: 'PRIMARY KEY', description: 'Unique identifier for the company.' },
+                { name: 'company_name', type: 'VARCHAR(255)', constraints: 'NOT NULL', description: 'The public-facing name of the company.' },
+                { name: 'legal_name', type: 'VARCHAR(255)', constraints: 'NOT NULL', description: 'The official legal name of the company.' },
+                { name: 'email', type: 'VARCHAR(255)', constraints: 'UNIQUE, NOT NULL', description: "Company's official email address." },
+                { name: 'phone_number', type: 'VARCHAR(50)', constraints: 'UNIQUE, NOT NULL', description: "Company's phone number, used for login." },
+                { name: 'password_hash', type: 'VARCHAR(255)', constraints: 'NOT NULL', description: 'Hashed password for company panel login.' },
+                { name: 'status', type: 'VARCHAR(20)', constraints: "NOT NULL DEFAULT 'pending'", description: 'Approval status (`pending`, `approved`, `rejected`).' },
+                { name: 'approved_by', type: 'UUID', constraints: 'FOREIGN KEY (super_admins.id)', description: 'The ID of the super admin who approved the request. NULLable.' },
+                { name: 'approved_at', type: 'TIMESTAMPTZ', constraints: 'NULL', description: 'Timestamp when the company was approved.' },
+                { name: 'created_at', type: 'TIMESTAMPTZ', constraints: 'NOT NULL DEFAULT NOW()', description: 'Timestamp of registration request.' },
+                { name: 'updated_at', type: 'TIMESTAMPTZ', constraints: 'NOT NULL DEFAULT NOW()', description: 'Timestamp of the last update.' }
+            ],
+            relations: {
+                belongsTo: ['super_admins'],
+                hasMany: ['branches', 'company_documents', 'employees']
+            }
+        },
+        branches: {
+            purpose: "Stores details about the different branches associated with a company.",
+            columns: [
+                { name: 'id', type: 'UUID', constraints: 'PRIMARY KEY', description: 'Unique identifier for the branch.' },
+                { name: 'company_id', type: 'UUID', constraints: 'FOREIGN KEY (companies.id)', description: 'Links the branch to its parent company.' },
+                { name: 'branch_name', type: 'VARCHAR(255)', constraints: 'NOT NULL', description: 'The name of the branch (e.g., "Main Office").' },
+                { name: 'address', type: 'TEXT', constraints: 'NULL', description: 'Full address of the branch.' },
+                { name: 'latitude', type: 'DECIMAL(10, 8)', constraints: 'NOT NULL', description: 'GPS latitude coordinate.' },
+                { name: 'longitude', type: 'DECIMAL(11, 8)', constraints: 'NOT NULL', description: 'GPS longitude coordinate.' },
+                { name: 'created_at', type: 'TIMESTAMPTZ', constraints: 'NOT NULL DEFAULT NOW()', description: 'Timestamp of when the record was created.' }
+            ],
+            relations: {
+                belongsTo: ['companies']
+            }
+        },
+        company_documents: {
+            purpose: "Stores references to documents uploaded by companies during registration.",
+            columns: [
+                { name: 'id', type: 'UUID', constraints: 'PRIMARY KEY', description: 'Unique identifier for the document.' },
+                { name: 'company_id', type: 'UUID', constraints: 'FOREIGN KEY (companies.id)', description: 'Links the document to the company.' },
+                { name: 'document_type', type: 'VARCHAR(50)', constraints: 'NOT NULL', description: 'Type of the document (`trade_license`, `additional_doc`).' },
+                { name: 'file_url', type: 'VARCHAR(255)', constraints: 'NOT NULL', description: 'URL or path where the file is stored (e.g., S3 bucket).' },
+                { name: 'uploaded_at', type: 'TIMESTAMPTZ', constraints: 'NOT NULL DEFAULT NOW()', description: 'Timestamp of when the document was uploaded.' }
+            ],
+            relations: {
+                belongsTo: ['companies']
+            }
+        },
+        employees: {
+            purpose: "Stores information for all employees of all companies.",
+            columns: [
+                { name: 'id', type: 'UUID', constraints: 'PRIMARY KEY', description: 'Unique identifier for the employee.' },
+                { name: 'company_id', type: 'UUID', constraints: 'FOREIGN KEY (companies.id)', description: 'Links the employee to their company.' },
+                { name: 'email', type: 'VARCHAR(255)', constraints: 'UNIQUE, NOT NULL', description: "Employee's email, used for login/notifications." },
+                { name: 'phone_number', type: 'VARCHAR(50)', constraints: 'UNIQUE, NOT NULL', description: "Employee's phone number." },
+                { name: 'password_hash', type: 'VARCHAR(255)', constraints: 'NOT NULL', description: 'Hashed password for employee login.' },
+                { name: 'first_name', type: 'VARCHAR(255)', constraints: 'NOT NULL', description: "Employee's first name." },
+                { name: 'last_name', type: 'VARCHAR(255)', constraints: 'NOT NULL', description: "Employee's last name." },
+                { name: 'role', type: 'VARCHAR(20)', constraints: "NOT NULL DEFAULT 'employee'", description: 'Role within the company (`employee`, `hr`, `admin`).' },
+                { name: 'status', type: 'VARCHAR(20)', constraints: "NOT NULL DEFAULT 'pending'", description: 'Onboarding status (`pending`, `active`, `inactive`, `rejected`).' },
+                { name: 'approved_by', type: 'UUID', constraints: 'FOREIGN KEY (employees.id)', description: 'The ID of the HR/Admin who approved the join request. NULLable.' },
+                { name: 'onboarded_at', type: 'TIMESTAMPTZ', constraints: 'NULL', description: 'Timestamp when the employee was approved/onboarded.' },
+                { name: 'created_at', type: 'TIMESTAMPTZ', constraints: 'NOT NULL DEFAULT NOW()', description: 'Timestamp of when the record was created.' },
+                { name: 'updated_at', type: 'TIMESTAMPTZ', constraints: 'NOT NULL DEFAULT NOW()', description: 'Timestamp of the last update.' }
+            ],
+            relations: {
+                belongsTo: ['companies', 'employees'],
+                hasMany: ['attendance', 'employees']
+            }
+        },
+        attendance: {
+            purpose: "Logs the check-in and check-out events for each employee.",
+            columns: [
+                { name: 'id', type: 'UUID', constraints: 'PRIMARY KEY', description: 'Unique identifier for the attendance record.' },
+                { name: 'employee_id', type: 'UUID', constraints: 'FOREIGN KEY (employees.id)', description: 'Links the record to the employee.' },
+                { name: 'check_in_time', type: 'TIMESTAMPTZ', constraints: 'NOT NULL', description: 'The exact time the employee checked in.' },
+                { name: 'check_out_time', type: 'TIMESTAMPTZ', constraints: 'NULL', description: 'The exact time the employee checked out.' },
+                { name: 'check_in_latitude', type: 'DECIMAL(10, 8)', constraints: 'NOT NULL', description: 'GPS latitude at check-in.' },
+                { name: 'check_in_longitude', type: 'DECIMAL(11, 8)', constraints: 'NOT NULL', description: 'GPS longitude at check-in.' },
+                { name: 'check_out_latitude', type: 'DECIMAL(10, 8)', constraints: 'NULL', description: 'GPS latitude at check-out.' },
+                { name: 'check_out_longitude', type: 'DECIMAL(11, 8)', constraints: 'NULL', description: 'GPS longitude at check-out.' },
+                { name: 'check_in_image_url', type: 'VARCHAR(255)', constraints: 'NOT NULL', description: 'URL/path to the face capture image at check-in.' },
+                { name: 'check_out_image_url', type: 'VARCHAR(255)', constraints: 'NULL', description: 'URL/path to the face capture image at check-out.' },
+                { name: 'date', type: 'DATE', constraints: 'NOT NULL', description: 'The date of the attendance, for easy daily querying.' }
+            ],
+            relations: {
+                belongsTo: ['employees']
+            }
+        }
+    };
+
+    const tablesNav = document.getElementById('tables-nav');
+    const tableDetailsContainer = document.getElementById('table-details-container');
+    const diagramContainer = document.getElementById('diagram-container');
+    const viewToggleBtn = document.getElementById('view-toggle-btn');
+    const visualView = document.getElementById('visual-view');
+    const explorerView = document.getElementById('explorer-view');
+    
+    let currentView = 'visual';
+
+    function getRelatedTables(tableName) {
+        const relations = schemaData[tableName].relations;
+        let related = [];
+        if (relations) {
+            if(relations.belongsTo) related.push(...relations.belongsTo);
+            if(relations.hasMany) related.push(...relations.hasMany);
+        }
+        return [...new Set(related)];
+    }
+
+    function renderTableDetails(tableName) {
+        const tableData = schemaData[tableName];
+        if (!tableData) {
+            tableDetailsContainer.innerHTML = `<p class="text-red-500">Table not found!</p>`;
+            return;
+        }
+
+        const columnsHtml = tableData.columns.map(col => {
+            let keyClass = '';
+            if (col.constraints.includes('PRIMARY KEY')) keyClass = 'key-pk';
+            if (col.constraints.includes('FOREIGN KEY')) keyClass = 'key-fk';
+            
+            return `
+                <tr class="border-b border-gray-200 hover:bg-gray-50">
+                    <td class="p-3 font-mono text-sm">${col.name}</td>
+                    <td class="p-3 text-sm">${col.type}</td>
+                    <td class="p-3 text-sm"><span class="px-2 py-1 rounded ${keyClass}">${col.constraints}</span></td>
+                    <td class="p-3 text-sm text-gray-600">${col.description}</td>
+                </tr>
+            `;
+        }).join('');
+
+        const relations = tableData.relations || {};
+        const belongsToHtml = (relations.belongsTo || []).map(rel => `<a href="#" data-table="${rel}" class="relation-link text-[#2A9D8F] hover:underline">${rel}</a>`).join(', ');
+        const hasManyHtml = (relations.hasMany || []).map(rel => `<a href="#" data-table="${rel}" class="relation-link text-[#2A9D8F] hover:underline">${rel}</a>`).join(', ');
+
+        const relationsHtml = `
+            <div class="mt-6 p-4 bg-gray-50 rounded-lg border">
+                <h4 class="text-md font-semibold text-[#264653] mb-2">Relationships</h4>
+                ${belongsToHtml ? `<p class="text-sm"><strong class="font-medium">Belongs To:</strong> ${belongsToHtml}</p>` : ''}
+                ${hasManyHtml ? `<p class="text-sm mt-1"><strong class="font-medium">Has Many:</strong> ${hasManyHtml}</p>` : ''}
+                ${!belongsToHtml && !hasManyHtml ? `<p class="text-sm text-gray-500">No defined relationships.</p>` : ''}
+            </div>
+        `;
+
+        tableDetailsContainer.innerHTML = `
+            <h2 class="text-3xl font-bold text-[#E76F51]">${tableName}</h2>
+            <p class="mt-2 text-gray-700">${tableData.purpose}</p>
+            <div class="mt-6 overflow-x-auto">
+                <table class="min-w-full bg-white border border-gray-200 rounded-lg">
+                    <thead class="table-header">
+                        <tr>
+                            <th class="p-3 text-left text-sm font-semibold uppercase tracking-wider">Column</th>
+                            <th class="p-3 text-left text-sm font-semibold uppercase tracking-wider">Data Type</th>
+                            <th class="p-3 text-left text-sm font-semibold uppercase tracking-wider">Constraints</th>
+                            <th class="p-3 text-left text-sm font-semibold uppercase tracking-wider">Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${columnsHtml}
+                    </tbody>
+                </table>
+            </div>
+            ${relationsHtml}
+        `;
+        
+        document.querySelectorAll('.relation-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const targetTable = e.target.dataset.table;
+                renderTableDetails(targetTable);
+                updateActiveNav(targetTable);
+            });
+        });
+    }
+
+    function updateActiveNav(tableName) {
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.classList.remove('active');
+            if (item.dataset.table === tableName) {
+                item.classList.add('active');
+            }
+        });
+    }
+    
+    function populateNav() {
+        tablesNav.innerHTML = Object.keys(schemaData).map(tableName => `
+            <li>
+                <a href="#" class="nav-item block px-4 py-2 rounded-md text-gray-700 transition-colors duration-200" data-table="${tableName}">${tableName}</a>
+            </li>
+        `).join('');
+
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.preventDefault();
+                const tableName = e.target.dataset.table;
+                renderTableDetails(tableName);
+                updateActiveNav(tableName);
+            });
+        });
+    }
+    
+    function populateDiagram() {
+        diagramContainer.innerHTML = Object.keys(schemaData).map(tableName => {
+            const tableData = schemaData[tableName];
+            const pk = tableData.columns.find(c => c.constraints.includes('PRIMARY KEY'))?.name || 'N/A';
+            const fks = tableData.columns.filter(c => c.constraints.includes('FOREIGN KEY')).map(c => c.name);
+
+            return `
+            <div class="diagram-card bg-white p-4 rounded-lg shadow-md cursor-pointer" data-table="${tableName}">
+                <h3 class="font-bold text-lg text-[#264653]">${tableName}</h3>
+                <div class="mt-2 text-sm space-y-1">
+                    <p><span class="key-pk px-2 py-0.5 rounded text-xs">PK</span> <span class="font-mono">${pk}</span></p>
+                    ${fks.length > 0 ? fks.map(fk => `<p><span class="key-fk px-2 py-0.5 rounded text-xs">FK</span> <span class="font-mono">${fk}</span></p>`).join('') : ''}
+                </div>
+            </div>
+            `;
+        }).join('');
+        
+        document.querySelectorAll('.diagram-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                const cardEl = e.currentTarget;
+                const tableName = cardEl.dataset.table;
+                
+                document.querySelectorAll('.diagram-card').forEach(c => c.classList.remove('highlighted', 'related'));
+                cardEl.classList.add('highlighted');
+                
+                const relatedTables = getRelatedTables(tableName);
+                relatedTables.forEach(relTable => {
+                    const relCard = document.querySelector(`.diagram-card[data-table="${relTable}"]`);
+                    if (relCard) relCard.classList.add('related');
+                });
+
+                setTimeout(() => {
+                    toggleView('explorer');
+                    renderTableDetails(tableName);
+                    updateActiveNav(tableName);
+                }, 300);
+            });
+        });
+    }
+
+    function toggleView(view) {
+        if (view === 'explorer') {
+            currentView = 'explorer';
+            visualView.classList.add('hidden');
+            explorerView.classList.remove('hidden');
+            viewToggleBtn.textContent = 'Switch to Visual Map';
+            viewToggleBtn.className = 'px-4 py-2 rounded-md text-sm font-medium transition-colors bg-[#2A9D8F] text-white hover:bg-[#217a6f]';
+        } else {
+            currentView = 'visual';
+            visualView.classList.remove('hidden');
+            explorerView.classList.add('hidden');
+            viewToggleBtn.textContent = 'Switch to Explorer';
+            viewToggleBtn.className = 'px-4 py-2 rounded-md text-sm font-medium transition-colors bg-[#E76F51] text-white hover:bg-[#d85d3f]';
+            document.querySelectorAll('.diagram-card').forEach(c => c.classList.remove('highlighted', 'related'));
+        }
+    }
+
+    viewToggleBtn.addEventListener('click', () => {
+        toggleView(currentView === 'visual' ? 'explorer' : 'visual');
+    });
+
+    function init() {
+        populateNav();
+        populateDiagram();
+        toggleView('visual');
+        const firstTable = Object.keys(schemaData)[0];
+        renderTableDetails(firstTable);
+        updateActiveNav(firstTable);
+    }
+
+    init();
+});
+</script>
+</body>
+</html>
